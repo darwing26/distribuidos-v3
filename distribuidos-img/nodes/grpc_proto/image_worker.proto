@@ -1,0 +1,47 @@
+syntax = "proto3";
+package imageworker;
+
+service ImageWorker {
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc SubmitJob(JobRequest) returns (JobAck);
+}
+
+message HealthRequest {}
+message HealthResponse {
+  string status = 1;
+  string node_name = 2;
+}
+
+message Transformation {
+  string code = 1;
+  string params_json = 2;
+  uint32 order = 3;
+}
+
+message ImageTask {
+  string image_id = 1;
+  string input_path = 2;
+  string output_format = 3;
+  repeated Transformation transforms = 4;
+}
+
+message JobRequest {
+  string request_id = 1;
+  repeated ImageTask images = 2;
+}
+
+// Resultado por imagen procesada.
+message ImageResult {
+  string image_id = 1;
+  string output_path = 2;
+  string status = 3; // ok | error
+  string error = 4;
+}
+
+// ACK textual devuelto por el servidor tras recibir el job.
+message JobAck {
+  bool ok = 1;
+  string message = 2;
+  repeated ImageResult results = 3;
+}
+
