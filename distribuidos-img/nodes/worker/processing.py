@@ -27,6 +27,18 @@ def _load_params(params_raw: Any) -> Dict[str, Any]:
     return {}
 
 
+def _resolve_save_format(fmt: str | None) -> str:
+    fmt_norm = (fmt or "").strip().lower()
+    mapping = {
+        "jpg": "JPEG",
+        "jpeg": "JPEG",
+        "tif": "TIFF",
+        "tiff": "TIFF",
+        "bmp": "BMP",
+    }
+    return mapping.get(fmt_norm, fmt_norm.upper() or "JPEG")
+
+
 def _apply_single_transform(img: Image.Image, code: str | None, params_raw: Any) -> Image.Image:
     code = (code or "").strip().upper()
     params = _load_params(params_raw)
@@ -40,7 +52,7 @@ def _apply_single_transform(img: Image.Image, code: str | None, params_raw: Any)
     if code == "RESIZE":
         width = int(params.get("width", img.width))
         height = int(params.get("height", img.height))
-    return img.resize((width, height), RESAMPLE_LANCZOS)
+        return img.resize((width, height), RESAMPLE_LANCZOS)
 
     if code == "CROP":
         x = int(params.get("x", 0))
@@ -114,7 +126,8 @@ def process_image_task(task, request_id: str) -> Tuple[str, str | None, str | No
     output_dir = os.path.join("data", "output", str(request_id))
     os.makedirs(output_dir, exist_ok=True)
     base_name = os.path.splitext(os.path.basename(input_path))[0]
-    output_path = os.path.join(output_dir, f"{base_name}.{output_format}")
+    output_ext = "jpg" if output_format in {"jpeg"} else output_format
+    output_path = os.path.join(output_dir, f"{base_name}.{output_ext}")
 
     try:
         img = Image.open(input_path)
@@ -134,7 +147,10 @@ def process_image_task(task, request_id: str) -> Tuple[str, str | None, str | No
         for _, code, params in normalized:
             img = _apply_single_transform(img, code, params)
 
-        img.save(output_path, format=output_format.upper())
+        save_format = _resolve_save_format(output_format)
+        if save_format == "JPEG" and img.mode not in {"RGB", "L"}:
+            img = img.convert("RGB")
+        img.save(output_path, format=save_format)
         return "ok", output_path, None
     except Exception as exc:  # pragma: no cover
         return "error", None, str(exc)

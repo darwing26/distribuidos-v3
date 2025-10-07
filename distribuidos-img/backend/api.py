@@ -6,6 +6,8 @@ import uuid
 import xml.etree.ElementTree as ET
 
 import bcrypt
+from typing import List
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 import httpx
 from pydantic import BaseModel, EmailStr
@@ -122,7 +124,7 @@ async def procesar_imagen(
   usuario_id: int = Form(...),
   output_format: str = Form("jpg"),
   transforms: str | None = Form(None),
-  file: UploadFile = File(...),
+  files: List[UploadFile] = File(...),
 ):
   usuario = obtener_usuario_por_id(usuario_id)
   if not usuario:
@@ -130,26 +132,39 @@ async def procesar_imagen(
   if usuario.get("estado") != "activo":
     raise HTTPException(403, "Usuario inactivo o bloqueado")
 
-  os.makedirs("data/input", exist_ok=True)
-  filename = f"{uuid.uuid4()}_{file.filename}"
-  input_path = os.path.join("data/input", filename)
-  with open(input_path, "wb") as f:
-    shutil.copyfileobj(file.file, f)
+  uploads = list(files or [])
+  if not uploads:
+    raise HTTPException(400, "Debe adjuntar al menos una imagen")
 
+  os.makedirs("data/input", exist_ok=True)
   transforms_list = _build_transforms(transforms)
-  payload = json.dumps({
-    "original_name": file.filename,
-    "input_path": input_path,
-    "input_format": file.filename.split(".")[-1] if "." in file.filename else "jpg",
-    "output_format": output_format,
-    "transforms": transforms_list,
-  })
+  imagenes_payload: list[str] = []
+  saved_paths: list[str] = []
+
+  for upload in uploads:
+    if upload.filename is None:
+      raise HTTPException(400, "Cada archivo debe tener un nombre válido")
+    safe_name = upload.filename or "imagen"
+    filename = f"{uuid.uuid4()}_{safe_name}"
+    input_path = os.path.join("data", "input", filename)
+    with open(input_path, "wb") as f:
+      shutil.copyfileobj(upload.file, f)
+    saved_paths.append(input_path)
+
+    payload = json.dumps({
+      "original_name": upload.filename,
+      "input_path": input_path,
+      "input_format": upload.filename.split(".")[-1] if "." in upload.filename else "jpg",
+      "output_format": output_format,
+      "transforms": transforms_list,
+    })
+    imagenes_payload.append(f"<tns:string><![CDATA[{payload}]]></tns:string>")
 
   body = f"""
   <tns:crearSolicitud>
     <tns:usuario_id>{usuario_id}</tns:usuario_id>
     <tns:imagenes>
-    <tns:string><![CDATA[{payload}]]></tns:string>
+    {''.join(imagenes_payload)}
     </tns:imagenes>
   </tns:crearSolicitud>
   """
@@ -167,4 +182,4 @@ async def procesar_imagen(
   except Exception as exc:  # pragma: no cover
     raise HTTPException(502, f"Respuesta SOAP inválida: {exc}") from exc
 
-  return {"solicitud": ack, "input_path": input_path}
+  return {"solicitud": ack, "input_paths": saved_paths}

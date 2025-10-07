@@ -4,8 +4,9 @@ param(
     [string]$Username = $("userprueba_" + [System.Guid]::NewGuid().ToString("N").Substring(0, 8)),
     [string]$Email = $("userprueba_" + [System.Guid]::NewGuid().ToString("N").Substring(0, 8) + "@example.com"),
     [string]$Password = "Secret123",
-    [string]$ImagePath = "..\img\imagen.jpg",
-    [string]$OutputFormat = "png",
+    [string[]]$ImagePaths = @("..\img\imagen1.png","..\img\imagen2.png","..\img\imagen3.png","..\img\imagen4.png","..\img\imagen5.png","..\img\imagen6.png","..\img\imagen7.png","..\img\imagen8.png","..\img\imagen9.png","..\img\imagen10.png","..\img\imagen11.png","..\img\imagen12.png","..\img\imagen13.png","..\img\imagen14.png","..\img\imagen15.png","..\img\imagen16.png","..\img\imagen17.png","..\img\imagen18.png","..\img\imagen19.png","..\img\imagen20.png","..\img\imagen21.png","..\img\imagen22.png","..\img\imagen23.png","..\img\imagen24.png","..\img\imagen25.png","..\img\imagen26.png","..\img\imagen27.png","..\img\imagen28.png","..\img\imagen29.png","..\img\imagen30.png","..\img\imagen31.png","..\img\imagen32.png","..\img\imagen33.png","..\img\imagen34.png","..\img\imagen35.png","..\img\imagen36.png","..\img\imagen37.png"
+),
+    [string]$OutputFormat = "jpg",
     [string]$TransformsJson = '[{"code":"grayscale"},{"code":"resize","params":{"width":256,"height":256}}]'
 )
 
@@ -38,20 +39,24 @@ function Invoke-JsonPost {
     }
 }
 
-function Get-ResolvedImagePath {
-    param([string]$Path)
-    try {
-        return (Resolve-Path $Path -ErrorAction Stop).Path
+function Get-ResolvedImagePaths {
+    param([string[]]$Paths)
+    $resolved = @()
+    foreach ($path in $Paths) {
+        try {
+            $resolved += (Resolve-Path $path -ErrorAction Stop).Path
+        }
+        catch {
+            throw "No se pudo resolver la ruta del archivo de entrada: $path"
+        }
     }
-    catch {
-        throw "No se pudo resolver la ruta del archivo de entrada: $Path"
-    }
+    return $resolved
 }
 
-function Invoke-ImageTransform {
+function Invoke-ImageBatch {
     param(
         [int]$UsuarioId,
-        [string]$ResolvedImagePath,
+        [string[]]$ResolvedImagePaths,
         [string]$OutputFormat,
         [string]$TransformsJson,
         [string]$ApiBase
@@ -66,12 +71,26 @@ function Invoke-ImageTransform {
         $content.Add([System.Net.Http.StringContent]::new($OutputFormat), "output_format")
         $content.Add([System.Net.Http.StringContent]::new($TransformsJson), "transforms")
 
-        $fileStream  = [System.IO.File]::OpenRead($ResolvedImagePath)
+        $streams = @()
         try {
-            $fileContent = [System.Net.Http.StreamContent]::new($fileStream)
-            $fileContent.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse("image/jpeg")
-            $fileName = [System.IO.Path]::GetFileName($ResolvedImagePath)
-            $content.Add($fileContent, "file", $fileName)
+            foreach ($path in $ResolvedImagePaths) {
+                $stream = [System.IO.File]::OpenRead($path)
+                $streams += $stream
+                $fileContent = [System.Net.Http.StreamContent]::new($stream)
+                $ext = [System.IO.Path]::GetExtension($path)
+                $mime = "application/octet-stream"
+                switch ($ext.ToLowerInvariant()) {
+                    ".jpg" { $mime = "image/jpeg" }
+                    ".jpeg" { $mime = "image/jpeg" }
+                    ".png" { $mime = "image/png" }
+                    ".bmp" { $mime = "image/bmp" }
+                    ".gif" { $mime = "image/gif" }
+                    default { }
+                }
+                $fileContent.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse($mime)
+                $fileName = [System.IO.Path]::GetFileName($path)
+                $content.Add($fileContent, "files", $fileName)
+            }
 
             $endpoint = "$ApiBase/procesar-imagen"
             $response = $client.PostAsync($endpoint, $content).Result
@@ -85,7 +104,9 @@ function Invoke-ImageTransform {
             }
         }
         finally {
-            $fileStream.Dispose()
+            foreach ($s in $streams) {
+                $s.Dispose()
+            }
         }
     }
     finally {
@@ -113,8 +134,9 @@ Write-Host "    Sesión iniciada para $($loginResp.username) (ID $usuarioId)" -F
 
 # 3. Transformación
 Write-Host "[3/3] Solicitando transformación..." -ForegroundColor Cyan
-$resolvedImage = Get-ResolvedImagePath -Path $ImagePath
-$result = Invoke-ImageTransform -UsuarioId $usuarioId -ResolvedImagePath $resolvedImage -OutputFormat $OutputFormat -TransformsJson $TransformsJson -ApiBase $ApiBase
+$resolvedImages = Get-ResolvedImagePaths -Paths $ImagePaths
+Write-Host "    Enviando $($resolvedImages.Count) archivo(s)" -ForegroundColor DarkGray
+$result = Invoke-ImageBatch -UsuarioId $usuarioId -ResolvedImagePaths $resolvedImages -OutputFormat $OutputFormat -TransformsJson $TransformsJson -ApiBase $ApiBase
 Write-Host "    Transformación enviada. Respuesta:" -ForegroundColor Green
 $result | ConvertTo-Json -Depth 6 | Write-Host
 
