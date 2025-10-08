@@ -1,83 +1,223 @@
-### Sistema distribuido de procesamiento de imÃƒÂ¡genes (Avance 2)
+# Sistema Distribuido de Procesamiento de Imágenes
 
-Comandos rÃƒÂ¡pidos:
-1) Crear venv e instalar:
-    **Linux/macOS**
-    ```bash
-    python -m venv .venv
-    source .venv/bin/activate
-    pip install -r requirements.txt
-    ```
+## 🎯 Características Principales
 
-    **Windows (PowerShell)**
-    ```powershell
-    python -m venv .venv
-    .\.venv\Scripts\Activate.ps1
-    pip install -r requirements.txt
-    ```
+- **Procesamiento en Lote**: Procesa múltiples imágenes simultáneamente
+- **Hasta 5 Transformaciones por Imagen**: Combina hasta 5 operaciones diferentes
+- **Instrucciones Personalizadas**: Define transformaciones específicas para cada imagen
+- **Exportación ZIP**: Recibe todas las imágenes procesadas en un solo archivo
+- **9 Tipos de Transformaciones**: Escala de grises, redimensionar, recortar, rotar, reflejar, desenfocar, perfilar, ajustar brillo/contraste, marcas de agua
+- **3 Formatos de Salida**: JPG, PNG, TIF
 
-    Si PowerShell bloquea el script, ejecuta previamente `Set-ExecutionPolicy -Scope Process Bypass` en la misma ventana.
+## 📦 Instalación Rápida
 
-2) Generar stubs gRPC:
-   python -m grpc_tools.protoc -I backend/grpc_proto --python_out=backend/grpc_proto --grpc_python_out=backend/grpc_proto backend/grpc_proto/image_worker.proto
-   python -m grpc_tools.protoc -I nodes/grpc_proto --python_out=nodes/grpc_proto --grpc_python_out=nodes/grpc_proto nodes/grpc_proto/image_worker.proto
+### 1. Instalar Dependencias
 
-3) Levantar nodo trabajador gRPC:
-   python nodes/worker/server.py
-
-4) Levantar servidor SOAP (WSDL en http://127.0.0.1:9000/?wsdl):
-   python backend/soap_service.py
-
-5) Levantar API cliente (recibe uploads y llama SOAP):
-   uvicorn backend.api:app --reload
-
-Base de datos: ejecutar el script SQL provisto anteriormente para crear tablas.
-
-### Flujo end-to-end (Avance 2)
-
-1. El cliente HTTP (`backend/api.py`) recibe un `multipart/form-data` con la imagen y los parámetros del pipeline.
-2. El cliente construye un payload JSON y lo envía al servidor de aplicación vía SOAP (`backend/soap_service.py`).
-3. El servidor SOAP registra la solicitud en MySQL, selecciona un nodo gRPC y delega el trabajo usando `SubmitJob`.
-4. El nodo worker (`nodes/worker/server.py`) procesa las transformaciones (grayscale, resize, crop, blur, etc.) con Pillow y guarda la imagen resultante en `data/output/<solicitud>/`.
-5. El servidor SOAP actualiza estado en base de datos y responde con un JSON de resumen (incluido dentro de la respuesta SOAP).
-
-### Endpoints adicionales (Avance 3)
-
-- **POST `/signup`** – Registra un usuario nuevo. Cuerpo JSON:
-
-   ```json
-   {
-      "username": "usuario_demo",
-      "email": "demo@example.com",
-      "password": "secreto123"
-   }
-   ```
-
-   Respuesta: `{ "usuario_id": 1, "username": "usuario_demo", ... }`
-
-- **POST `/login`** – Inicia sesión validando credenciales. Cuerpo JSON:
-
-   ```json
-   {
-      "username": "usuario_demo",
-      "password": "secreto123"
-   }
-   ```
-
-   Respuesta: `{ "usuario_id": 1, "username": "usuario_demo", "estado": "activo" }`
-
-Utiliza el `usuario_id` devuelto por `/login` al invocar `/procesar-imagen`.
-
-### Ejemplo de solicitud desde cliente (PowerShell)
-
+**Windows (PowerShell)**
 ```powershell
-$body = @{
-    usuario_id = "1"
-    output_format = "png"
-    transforms = '[{"code":"grayscale"},{"code":"resize","params":{"width":256,"height":256}}]'
-    file = Get-Item "path\a\tu_imagen.jpg"
-}
-Invoke-RestMethod -Uri http://127.0.0.1:8000/procesar-imagen -Method Post -Form $body
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 ```
 
-El campo `transforms` acepta una lista JSON con las transformaciones a aplicar en orden. Si se omite, se aplica conversión a escala de grises por defecto.
+**Linux/macOS**
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+> **Nota:** Si PowerShell bloquea scripts, ejecuta: `Set-ExecutionPolicy -Scope Process Bypass`
+
+### 2. Generar Stubs gRPC
+
+```bash
+python -m grpc_tools.protoc -I backend/grpc_proto --python_out=backend/grpc_proto --grpc_python_out=backend/grpc_proto backend/grpc_proto/image_worker.proto
+python -m grpc_tools.protoc -I nodes/grpc_proto --python_out=nodes/grpc_proto --grpc_python_out=nodes/grpc_proto nodes/grpc_proto/image_worker.proto
+```
+
+### 3. Configurar Base de Datos
+
+Ejecuta el script SQL `backend/schema.sql` en tu servidor MySQL para crear las tablas necesarias.
+
+### 4. Levantar los Servicios
+
+Abre **3 terminales diferentes** y ejecuta:
+
+**Terminal 1 - Worker gRPC**
+```bash
+python nodes/worker/server.py
+```
+
+**Terminal 2 - Servidor SOAP**
+```bash
+python backend/soap_service.py
+```
+
+**Terminal 3 - API FastAPI**
+```bash
+uvicorn backend.api:app --reload
+```
+
+La API estará disponible en: `http://127.0.0.1:8000`  
+WSDL SOAP en: `http://127.0.0.1:9000/?wsdl`
+
+## 🚀 Inicio Rápido
+
+### Prueba con el Script Automatizado
+
+```powershell
+cd scripts
+.\test_batch_processing.ps1 -ImagePaths @("..\img\imagen1.png","..\img\imagen2.png")
+```
+
+Este script:
+1. ✅ Registra un usuario automáticamente
+2. ✅ Inicia sesión
+3. ✅ Envía las imágenes con transformaciones
+4. ✅ Descarga el archivo ZIP con los resultados
+
+### Ejemplo con Python
+
+```bash
+cd examples
+python batch_processing_example.py
+```
+
+## 📖 API Reference
+
+### Endpoints
+
+#### POST `/signup` - Registro de Usuario
+
+```json
+{
+  "username": "usuario_demo",
+  "email": "demo@example.com",
+  "password": "secreto123"
+}
+```
+
+**Respuesta:** `{ "usuario_id": 1, "username": "usuario_demo", ... }`
+
+#### POST `/login` - Iniciar Sesión
+
+```json
+{
+  "username": "usuario_demo",
+  "password": "secreto123"
+}
+```
+
+**Respuesta:** `{ "usuario_id": 1, "username": "usuario_demo", "estado": "activo" }`
+
+#### POST `/procesar-imagen` - Procesar Lote de Imágenes
+
+Envía un formulario `multipart/form-data` con:
+
+**Parámetros:**
+- `usuario_id` (int, requerido) - ID del usuario
+- `output_format` (string) - Formato por defecto: `jpg`, `png` o `tif`
+- `default_transforms` (JSON) - Transformaciones aplicadas a todas las imágenes
+- `instructions` (JSON) - Instrucciones específicas por imagen
+- `files` (archivos) - Una o más imágenes
+
+**Respuesta:** Archivo ZIP con todas las imágenes procesadas
+
+## 🎨 Transformaciones Disponibles
+
+Puedes aplicar hasta **5 transformaciones por imagen**:
+
+| Código | Descripción | Parámetros |
+|--------|-------------|------------|
+| `GRAYSCALE` | Escala de grises | Ninguno |
+| `RESIZE` | Redimensionar | `width`, `height` |
+| `CROP` | Recortar región | `x`, `y`, `width`, `height` |
+| `ROTATE` | Rotar imagen | `degrees` |
+| `FLIP` | Reflejar | `axis` (horizontal/vertical) |
+| `BLUR` | Desenfocar | `radius` |
+| `SHARPEN` | Aumentar nitidez | `factor` |
+| `BRIGHTNESS_CONTRAST` | Ajustar brillo/contraste | `brightness`, `contrast` |
+| `WATERMARK` | Marca de agua | `text`, `x`, `y` |
+
+## 💡 Ejemplos de Uso
+
+### Ejemplo 1: Transformaciones Simples
+
+```json
+{
+  "default_transforms": [
+    { "code": "GRAYSCALE", "order": 1 },
+    { "code": "RESIZE", "params": { "width": 800, "height": 600 }, "order": 2 }
+  ]
+}
+```
+
+### Ejemplo 2: Instrucciones por Imagen
+
+```json
+{
+  "instructions": [
+    {
+      "filename": "foto1.jpg",
+      "output_format": "png",
+      "transforms": [
+        { "code": "ROTATE", "params": { "degrees": 90 }, "order": 1 },
+        { "code": "WATERMARK", "params": { "text": "© 2025", "x": 10, "y": 10 }, "order": 2 },
+        { "code": "SHARPEN", "params": { "factor": 2.0 }, "order": 3 }
+      ]
+    },
+    {
+      "filename": "foto2.jpg",
+      "output_format": "jpg",
+      "transforms": [
+        { "code": "CROP", "params": { "x": 100, "y": 100, "width": 500, "height": 500 }, "order": 1 },
+        { "code": "BLUR", "params": { "radius": 3.0 }, "order": 2 }
+      ]
+    }
+  ]
+}
+```
+
+## 📂 Estructura del Proyecto
+
+```
+distribuidos-img/
+├── backend/
+│   ├── api.py              # API REST FastAPI
+│   ├── soap_service.py     # Servicio SOAP
+│   ├── grpc_client.py      # Cliente gRPC
+│   ├── models.py           # Acceso a datos
+│   └── schema.sql          # Esquema de BD
+├── nodes/
+│   └── worker/
+│       ├── server.py       # Worker gRPC
+│       └── processing.py   # Lógica de transformaciones
+├── scripts/
+│   └── test_batch_processing.ps1  # Script de prueba
+├── examples/
+│   └── batch_processing_example.py  # Ejemplo Python
+└── DOCUMENTATION.md        # Documentación completa
+```
+
+## 🔄 Arquitectura
+
+```
+Cliente → FastAPI → SOAP → gRPC Worker → Pillow
+                      ↓
+                   MySQL DB
+```
+
+1. Cliente envía imágenes vía HTTP
+2. FastAPI valida y prepara payload SOAP
+3. Servicio SOAP coordina con base de datos
+4. Worker gRPC procesa imágenes con Pillow
+5. Respuesta con archivo ZIP
+
+## 📝 Documentación Completa
+
+Ver [DOCUMENTATION.md](DOCUMENTATION.md) para:
+- Referencia completa de transformaciones
+- Ejemplos avanzados
+- Guía de desarrollo
+- Troubleshooting
