@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -78,14 +79,40 @@ class ImageService(ServiceBase):
         # Paso 2: Procesar cada imagen y registrarla en la BD
         for idx, raw in enumerate(imagenes, start=1):
             payload = _parse_imagen_payload(raw)
-            input_path = payload.get("input_path")
-            if not input_path:
-                raise ValueError(f"Imagen #{idx} sin input_path")
-
+            
+            # Obtener imagen_id y datos base64
+            imagen_id_uuid = payload.get("imagen_id")
+            if not imagen_id_uuid:
+                raise ValueError(f"Imagen #{idx} sin imagen_id")
+            
+            image_base64 = payload.get("image_data")
+            if not image_base64:
+                raise ValueError(f"Imagen #{idx} sin image_data (base64)")
+            
+            # Decodificar base64 y guardar en disco
+            try:
+                image_bytes = base64.b64decode(image_base64)
+            except Exception as e:
+                raise ValueError(f"Imagen #{idx} tiene datos base64 inválidos: {str(e)}")
+            
+            # Crear directorio de entrada si no existe
+            os.makedirs("data/input", exist_ok=True)
+            
             # Extrae información de la imagen
-            nombre = payload.get("original_name") or os.path.basename(input_path)
-            formato_in = payload.get("input_format") or os.path.splitext(input_path)[1].lstrip(".") or "jpg"
+            nombre = payload.get("original_name") or f"imagen_{idx}"
+            formato_in = payload.get("input_format") or "jpg"
             formato_out = payload.get("output_format", "jpg")
+            
+            # Crear ruta de archivo con el UUID
+            safe_name = nombre.replace("/", "_").replace("\\", "_")
+            filename = f"{imagen_id_uuid}_{safe_name}"
+            input_path = os.path.join("data", "input", filename)
+            
+            # Guardar imagen decodificada
+            with open(input_path, "wb") as f:
+                f.write(image_bytes)
+            
+            log(f"Imagen {idx} guardada en {input_path}", componente="soap", solicitud_id=solicitud_id)
 
             # Registra la imagen en la BD con estado 'pendiente'
             imagen_id = registrar_imagen(solicitud_id, nombre, input_path, formato_in, formato_out)

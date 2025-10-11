@@ -1,4 +1,18 @@
 # backend/api.py
+"""
+Backend API - Servidor de Lógica de Negocio
+============================================
+Este es el servidor backend que maneja la lógica de negocio y se comunica con SOAP.
+El Frontend se comunica con este servidor vía REST API.
+
+Responsabilidades:
+- Validar usuarios
+- Gestionar archivos de imágenes
+- Comunicación con servicio SOAP
+- Crear y retornar archivos ZIP procesados
+"""
+
+import base64
 import json
 import os
 import shutil
@@ -8,20 +22,20 @@ import xml.etree.ElementTree as ET
 import zipfile
 from typing import Any, Dict, List
 
-import bcrypt
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import FileResponse
 import httpx
 from pydantic import BaseModel, EmailStr
 
 from backend.models import (
-  crear_usuario,
-  obtener_usuario_por_email,
   obtener_usuario_por_id,
-  obtener_usuario_por_username,
 )
 
-app = FastAPI(title="Frontend Cliente")
+app = FastAPI(
+    title="Backend API",
+    description="Servidor backend que maneja procesamiento de imágenes",
+    version="2.0.0"
+)
 
 SOAP_URL = "http://127.0.0.1:9000/"
 SOAP_NS = "svc.imagenes"
@@ -229,6 +243,7 @@ def _build_transforms(transforms_json: str | None) -> list[dict]:
 
 
 def _parse_soap_response(xml_text: str) -> dict:
+  """Parsea la respuesta SOAP y extrae el resultado JSON"""
   root = ET.fromstring(xml_text)
   result = None
   for elem in root.iter():
@@ -240,57 +255,41 @@ def _parse_soap_response(xml_text: str) -> dict:
   return json.loads(result.text)
 
 
-class SignupBody(BaseModel):
-  username: str
-  email: EmailStr
-  password: str
+# =============================================================================
+# ENDPOINTS DEL BACKEND
+# =============================================================================
 
-
-class LoginBody(BaseModel):
-  username: str
-  password: str
-
-
-@app.post("/signup")
-async def signup(body: SignupBody):
-  username = body.username.strip()
-  email = body.email.strip().lower()
-  if not username:
-    raise HTTPException(400, "El nombre de usuario no puede estar vacío")
-
-  if obtener_usuario_por_username(username):
-    raise HTTPException(409, "El nombre de usuario ya está registrado")
-
-  if obtener_usuario_por_email(email):
-    raise HTTPException(409, "El correo electrónico ya está registrado")
-
-  if len(body.password) < 6:
-    raise HTTPException(400, "La contraseña debe tener al menos 6 caracteres")
-
-  pass_hash = bcrypt.hashpw(body.password.encode("utf-8"), bcrypt.gensalt()).decode()
-  usuario_id = crear_usuario(username, email, pass_hash)
-  return {"usuario_id": usuario_id, "username": username, "email": email}
-
-
-@app.post("/login")
-async def login(body: LoginBody):
-  username = body.username.strip()
-  user = obtener_usuario_por_username(username)
-  if not user:
-    raise HTTPException(401, "Credenciales inválidas")
-
-  if user.get("estado") != "activo":
-    raise HTTPException(403, "El usuario no está activo")
-
-  stored = user.get("pass_hash", "")
-  if not stored or not bcrypt.checkpw(body.password.encode("utf-8"), stored.encode("utf-8")):
-    raise HTTPException(401, "Credenciales inválidas")
-
+@app.get("/")
+async def root():
+  """
+  Endpoint raíz - Información del servicio backend
+  """
   return {
-    "usuario_id": user["id"],
-    "username": user["username"],
-    "email": user["email"],
-    "estado": user["estado"],
+    "service": "Backend API",
+    "version": "2.0.0",
+    "description": "Servidor backend para procesamiento de imágenes",
+    "soap_url": SOAP_URL
+  }
+
+
+@app.get("/health")
+async def health_check():
+  """
+  Health check del backend
+  Verifica conexión con el servicio SOAP
+  """
+  try:
+    async with httpx.AsyncClient(timeout=5.0) as client:
+      # Intentar conectar con SOAP
+      resp = await client.get(SOAP_URL.rstrip("/") + "/?wsdl")
+      soap_status = "ok" if resp.status_code == 200 else "error"
+  except:
+    soap_status = "unreachable"
+  
+  return {
+    "status": "ok",
+    "soap_service": soap_status,
+    "soap_url": SOAP_URL
   }
 
 
@@ -357,21 +356,19 @@ async def procesar_imagen(
       instructions_by_filename[str(filename)] = item
     instructions_by_index[idx] = item
 
-  os.makedirs("data/input", exist_ok=True)
   imagenes_payload: list[str] = []
-  saved_paths: list[str] = []
 
   # Procesar cada imagen
   for index, upload in enumerate(uploads):
     if upload.filename is None:
       raise HTTPException(400, "Cada archivo debe tener un nombre válido")
     
-    safe_name = upload.filename or "imagen"
-    filename = f"{uuid.uuid4()}_{safe_name}"
-    input_path = os.path.join("data", "input", filename)
-    with open(input_path, "wb") as f:
-      shutil.copyfileobj(upload.file, f)
-    saved_paths.append(input_path)
+    # Leer el contenido de la imagen y convertir a base64
+    image_bytes = await upload.read()
+    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+    
+    # Generar un ID único para esta imagen
+    imagen_id = str(uuid.uuid4())
 
     # Obtener instrucciones específicas para esta imagen
     instruction = instructions_by_filename.get(upload.filename) or instructions_by_index.get(index)
@@ -394,9 +391,11 @@ async def procesar_imagen(
     else:
       image_output_format = output_format
 
+    # Crear payload con imagen en base64
     payload = json.dumps({
+      "imagen_id": imagen_id,
       "original_name": upload.filename,
-      "input_path": input_path,
+      "image_data": image_base64,
       "input_format": upload.filename.split(".")[-1] if "." in upload.filename else "jpg",
       "output_format": image_output_format,
       "transforms": image_transforms,
