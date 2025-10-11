@@ -2,6 +2,7 @@
 import json
 import os
 import shutil
+import time
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
@@ -115,16 +116,49 @@ def _validate_transform_params(code: str, params: Dict[str, Any]) -> Dict[str, A
         if not text:
             raise ValueError("WATERMARK requiere el parámetro 'text'")
         result = {"text": text}
+        
+        # Validar posición X
         if "x" in params:
             try:
                 result["x"] = int(params["x"])
             except (TypeError, ValueError):
                 raise ValueError("WATERMARK.x debe ser numérico")
+        
+        # Validar posición Y
         if "y" in params:
             try:
                 result["y"] = int(params["y"])
             except (TypeError, ValueError):
                 raise ValueError("WATERMARK.y debe ser numérico")
+        
+        # Validar tamaño de fuente (opcional)
+        if "font_size" in params:
+            try:
+                font_size = int(params["font_size"])
+                if font_size < 8 or font_size > 200:
+                    raise ValueError("font_size debe estar entre 8 y 200")
+                result["font_size"] = font_size
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"WATERMARK.font_size inválido: {e}")
+        
+        # Validar color (opcional)
+        if "color" in params:
+            color = str(params["color"]).lower()
+            allowed_colors = {"white", "black", "red", "blue", "green", "yellow", "cyan", "magenta", "orange"}
+            if color not in allowed_colors:
+                raise ValueError(f"WATERMARK.color debe ser uno de: {', '.join(allowed_colors)}")
+            result["color"] = color
+        
+        # Validar opacidad (opcional)
+        if "opacity" in params:
+            try:
+                opacity = int(params["opacity"])
+                if opacity < 0 or opacity > 255:
+                    raise ValueError("opacity debe estar entre 0 y 255")
+                result["opacity"] = opacity
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"WATERMARK.opacity inválido: {e}")
+        
         return result
     
     return params
@@ -190,9 +224,7 @@ def soap_envelope(body_xml: str) -> str:
 def _build_transforms(transforms_json: str | None) -> list[dict]:
   """Construye lista de transformaciones, aplicando validación."""
   validated = _validate_transforms(transforms_json)
-  if not validated:
-    # Por defecto, escala de grises si no se especifica nada
-    return [{"code": "GRAYSCALE", "params": {}, "order": 1}]
+  # Si no hay transformaciones, retornar lista vacía (no aplicar nada)
   return validated
 
 
@@ -401,21 +433,39 @@ async def procesar_imagen(
   # Directorio donde están las imágenes procesadas
   output_dir = os.path.join("data", "output", str(solicitud_id))
   
-  # Esperar a que las imágenes estén listas (el worker ya las procesó sincrónicamente)
+  # Dar un tiempo razonable para que el worker termine de procesar
+  max_wait = 30  # segundos
+  wait_interval = 0.5  # segundos
+  elapsed = 0
+  
+  while not os.path.exists(output_dir) and elapsed < max_wait:
+    time.sleep(wait_interval)
+    elapsed += wait_interval
+  
+  # Verificar que el directorio existe y tiene archivos
   if not os.path.exists(output_dir):
-    raise HTTPException(500, "Las imágenes procesadas no están disponibles")
-
-  # Crear archivo ZIP
+    raise HTTPException(500, f"Las imágenes procesadas no están disponibles. Directorio esperado: {output_dir}")
+  
+  # Verificar que hay archivos en el directorio
+  archivos = [f for f in os.listdir(output_dir) if os.path.isfile(os.path.join(output_dir, f))]
+  if not archivos:
+    raise HTTPException(500, f"No se encontraron imágenes procesadas en {output_dir}")
+  
+  # Crear archivo ZIP con todas las imágenes en una carpeta con el ID de la solicitud
   zip_filename = f"solicitud_{solicitud_id}.zip"
   zip_path = os.path.join("data", "output", zip_filename)
   
   try:
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-      # Agregar todas las imágenes procesadas al ZIP
-      for filename in os.listdir(output_dir):
+      # Agregar todas las imágenes procesadas al ZIP dentro de una carpeta
+      # con el nombre del ID de la solicitud
+      for filename in archivos:
         file_path = os.path.join(output_dir, filename)
-        if os.path.isfile(file_path):
-          zipf.write(file_path, arcname=filename)
+        # arcname incluye la carpeta con el ID de la solicitud
+        arcname = f"solicitud_{solicitud_id}/{filename}"
+        zipf.write(file_path, arcname=arcname)
+    
+    print(f"[INFO] ZIP creado exitosamente: {zip_path} con {len(archivos)} archivo(s)")
     
     # Retornar el archivo ZIP
     return FileResponse(

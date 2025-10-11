@@ -142,14 +142,14 @@ foreach ($img in $resolvedImages) {
 # Crear instrucciones específicas para cada imagen
 $instructions = @()
 
-# Imagen 1: Escala de grises + Redimensionar + Rotar
+# Imagen 1: Escala de grises + Marca de agua + Rotar
 $instructions += @{
     filename = [System.IO.Path]::GetFileName($resolvedImages[0])
     output_format = "jpg"
     transforms = @(
         @{ code = "GRAYSCALE"; order = 1 },
-        @{ code = "RESIZE"; params = @{ width = 800; height = 600 }; order = 2 },
-        @{ code = "ROTATE"; params = @{ degrees = 90 }; order = 3 }
+        @{ code = "ROTATE"; params = @{ degrees = 90 }; order = 3 },
+        @{ code = "WATERMARK"; params = @{ text = "imagen1"; x = 20; y = 20 }; order = 2 }
     )
 }
 
@@ -160,8 +160,8 @@ if ($resolvedImages.Count -gt 1) {
         output_format = "png"
         transforms = @(
             @{ code = "BLUR"; params = @{ radius = 3.0 }; order = 1 },
-            @{ code = "WATERMARK"; params = @{ text = "Procesado"; x = 20; y = 20 }; order = 2 },
-            @{ code = "BRIGHTNESS_CONTRAST"; params = @{ brightness = 1.2; contrast = 1.1 }; order = 3 }
+            @{ code = "BRIGHTNESS_CONTRAST"; params = @{ brightness = 1.2; contrast = 1.1 }; order = 3 },
+            @{ code = "WATERMARK"; params = @{ text = "Procesado"; x = 100; y = 100 }; order = 5 }
         )
     }
 }
@@ -170,7 +170,7 @@ if ($resolvedImages.Count -gt 1) {
 if ($resolvedImages.Count -gt 2) {
     $instructions += @{
         filename = [System.IO.Path]::GetFileName($resolvedImages[2])
-        output_format = "tif"
+        output_format = "jpg"
         transforms = @(
             @{ code = "CROP"; params = @{ x = 100; y = 100; width = 500; height = 500 }; order = 1 },
             @{ code = "FLIP"; params = @{ axis = "horizontal" }; order = 2 },
